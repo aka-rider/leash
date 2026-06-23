@@ -1,0 +1,45 @@
+# leash configuration example
+# Copy to .leash.yaml (project) or ~/.config/leash/leash.yaml (user global)
+# Precedence: defaults < yaml < env (LEASH_*) < CLI flags
+
+# Detectors: which tool environments to auto-allow
+# Default when unset: homebrew, xcode, git, docker, claude
+# Setting this overrides the default — use comma-separated list
+# detect:
+#   - homebrew
+#   - xcode
+#   - git
+#   - docker
+#   - claude
+#   - go
+#   - npm
+#   - python
+
+# Additional read-only paths (unioned with CLI +r grants)
+# read:
+#   - ~/.config/myapp
+
+# Additional read-write paths (unioned with CLI +w grants; no exec)
+# write:
+#   - ~/wrk/project
+
+# Additional exec paths (unioned with CLI +x grants)
+# exec:
+#   - ~/bin
+
+# Sandbox workspace root (default: current directory)
+# workspace: ~/wrk/project
+
+# Allow outbound network (default: true)
+# Set false to deny all outbound connections (same as --no-network)
+# network: true
+
+# Extra environment variables to pass into the sandbox
+# extra_env:
+#   MY_VAR: value
+
+# Proxy environment variables to forward
+# proxy_env:
+#   - HTTP_PROXY
+#   - HTTPS_PROXY
+#   - NO_PROXY
