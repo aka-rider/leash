@@ -3,9 +3,22 @@ version: 2
 project_name: leash
 
 builds:
-  - id: sbx
-    main: ./cmd/sbx/
-    binary: sbx
+  - id: leash
+    main: ./cmd/leash/
+    binary: leash
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -trimpath -s -w -X main.version={{.Version}}
+
+  - id: leash-trace
+    main: ./cmd/trace/
+    binary: leash-trace
     env:
       - CGO_ENABLED=0
     goos:
@@ -17,15 +30,21 @@ builds:
       - -trimpath -s -w -X main.version={{.Version}}
 
 universal_binaries:
-  - id: sbx-universal
+  - id: leash-universal
     ids:
-      - sbx
+      - leash
+    replace: true
+
+  - id: leash-trace-universal
+    ids:
+      - leash-trace
     replace: true
 
 archives:
   - id: leash
     ids:
-      - sbx-universal
+      - leash-universal
+      - leash-trace-universal
     name_template: "leash_{{.Version}}_darwin_universal"
     format: tar.gz
     files:
@@ -38,10 +57,12 @@ brews:
     repository:
       owner: aka-rider
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     description: "Transparent macOS seatbelt sandbox for any command"
     homepage: "https://github.com/aka-rider/leash"
     license: MIT
     install: |
-      bin.install "sbx"
+      bin.install "leash"
+      bin.install "leash-trace"
     test: |
-      system "#{bin}/sbx", "--help"
+      system "#{bin}/leash", "--help"

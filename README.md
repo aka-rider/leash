@@ -4,6 +4,11 @@ macOS seatbelt sandbox for developer tools. Wraps any command in `sandbox-exec`
 with a deny-by-default profile, then grants back only the paths and capabilities
 you explicitly allow.
 
+leash is **library-first**: the `leash` binary is a thin wrapper around the
+`github.com/aka-rider/leash` Go package (see [Use as a library](#use-as-a-library)).
+A companion binary, `leash-trace`, runs a command the same way but also captures
+the kernel sandbox denials it triggers.
+
 ## Installation
 
 ```sh
@@ -11,31 +16,31 @@ brew tap aka-rider/tap
 brew install leash
 ```
 
-Or build from source (requires Go 1.22+, macOS only):
+Or build from source (requires Go 1.26+, macOS only):
 
 ```sh
 git clone https://github.com/aka-rider/leash
-cd leash && make install   # installs to /usr/local/bin/sbx
+cd leash && make install   # installs leash and leash-trace to /usr/local/bin
 ```
 
 ## Usage
 
 ```
-sbx [options] [+r PATH] [+w PATH] [+x PATH] [--] <command> [args...]
+leash [options] [+r PATH] [+w PATH] [+x PATH] [--] <command> [args...]
 ```
 
 ```sh
 # Run claude with the current directory writable
-sbx +w . claude --print "write a go server"
+leash +w . claude --print "write a go server"
 
 # Read-only access to an extra directory
-sbx +r ~/data python3 analyse.py
+leash +r ~/data python3 analyse.py
 
 # Block network access entirely
-sbx --no-network +w . go test ./...
+leash --no-network +w . go test ./...
 
 # Pass child flags through without ambiguity
-sbx +w . -- go build -v ./...
+leash +w . -- go build -v ./...
 ```
 
 ## Grant flags
@@ -48,12 +53,13 @@ sbx +w . -- go build -v ./...
 
 All three flags require the path to exist at run time — a missing path is a hard
 error rather than a silent skip. This is intentional: `+w /typo` should never
-produce a confusingly unconstrained sandbox.
+produce a confusingly unconstrained sandbox. Relative paths (including `.`) are
+resolved against the current directory.
 
 To make a directory both writable and executable, use both `+w` and `+x`:
 
 ```sh
-sbx +w ~/bin +x ~/bin my-build-tool
+leash +w ~/bin +x ~/bin my-build-tool
 ```
 
 ## Options
@@ -62,8 +68,6 @@ sbx +w ~/bin +x ~/bin my-build-tool
 |------|-------------|
 | `--workspace PATH` | Sandbox workspace root (default: current directory). The workspace is always readable; writable only with `+w .` or `--workspace`. |
 | `--no-network` | Deny all outbound network connections. |
-| `--trace` | Capture denied operations to a trace file (see `--trace-file`). |
-| `--trace-file PATH` | Trace output destination (default: `./sbx-trace.log`; `-` for stderr). Fails with an error if the file already exists. |
 | `--detect LIST` | Comma-separated list of tool detectors to run automatically (see Detectors). |
 | `--config PATH` | Config file path (default: searches `.leash.yaml`, `leash.yaml`, then `~/.config/leash/leash.yaml`). |
 | `--help`, `-h` | Print usage. |
@@ -101,6 +105,14 @@ workspace: ~/wrk/project
 
 # Allow outbound network (default: true; false = same as --no-network)
 network: true
+
+# Extra environment variables for the child
+extra_env:
+  MY_FLAG: "1"
+
+# Host environment variable NAMES to forward into the sandbox (must exist)
+proxy_env:
+  - HTTPS_PROXY
 ```
 
 **Environment variables** override the config file for scalar values:
@@ -110,6 +122,8 @@ network: true
 | `LEASH_WORKSPACE` | `--workspace` |
 | `LEASH_NO_NETWORK=1` | `--no-network` |
 | `LEASH_DETECT` | `--detect` (comma-separated) |
+| `LEASH_READ` / `LEASH_WRITE` / `LEASH_EXEC` | extra `+r` / `+w` / `+x` paths |
+| `LEASH_PROXY_ENV` | `proxy_env` (comma-separated) |
 | `LEASH_CONFIG` | `--config` |
 
 ## Detectors
@@ -130,32 +144,77 @@ or set `detect:` in the config.
 
 Unknown detector names are a hard error.
 
-## --trace
+## Tracing denials (leash-trace)
 
-`--trace` starts a `log stream` watcher that captures kernel sandbox denials for
-this run and writes grepable lines to the trace file. Each line has the format:
+`leash-trace` runs a command exactly like `leash`, but also starts a `log stream`
+watcher that captures this run's kernel sandbox denials and writes grepable lines
+to a trace file. It accepts the same grant flags and options as `leash`.
 
+```sh
+leash-trace +w . go test ./...
 ```
-<category>: <path>
-```
 
-Categories: `read`, `write`, `exec`, `network`, `mach`, `ipc`, `other`.
+Each line has the format `<category>: <path>`, where category is one of `read`,
+`write`, `exec`, `network`, `mach`, `ipc`, `other`:
 
-Example output:
 ```
 write: /private/var/folders/.../T/work/out.bin
 exec: /usr/local/bin/node
 network: (outbound)
 ```
 
-The trace file is opened with `O_EXCL` — if it already exists, `sbx` exits with an
-error. Use `--trace-file -` to write denials to stderr instead.
+The trace file defaults to `./leash-trace.log` and is opened with `O_EXCL` — if it
+already exists, `leash-trace` exits with an error. Use `--trace-file -` to write
+denials to stderr instead, or `--trace-file PATH` to choose the destination.
 
-Tracing requires the `log` binary (present on all macOS systems) and elevated log
-verbosity. It adds roughly 100–200 ms to startup while the kernel log stream
-initialises.
+Tracing requires the `log` binary (present on all macOS systems). It adds roughly
+100–200 ms to startup while the kernel log stream initialises.
+
+## Use as a library
+
+Build a command with `New`, configure it with the fluent `With*` methods, then call
+`Execute`. `Execute` returns `nil` on success and an `*exec.ExitError` on a non-zero
+exit; `ExitCode` maps any `Execute` error to a process exit code.
+
+```go
+package main
+
+import (
+	"context"
+	"os"
+
+	leash "github.com/aka-rider/leash"
+)
+
+func main() {
+	l := leash.New("go", "test", "./...").
+		WithAutodetectFrameworks(). // allow installed toolchains (go, git, ...)
+		WithWrite(".").             // make the current directory writable
+		WithStdout(os.Stdout).
+		WithStderr(os.Stderr)
+
+	os.Exit(leash.ExitCode(l.Execute(context.Background())))
+}
+```
+
+| Method | Effect |
+|--------|--------|
+| `New(program, args...)` | Create a `*Leash` for a program + args (network enabled by default). |
+| `WithAutodetectFrameworks()` | Auto-allow installed toolchains (homebrew, git, go, npm, python, docker, xcode). |
+| `WithDetect(names...)` | Run specific detectors (including `claude`). |
+| `WithRead` / `WithWrite` / `WithExec(paths...)` | Grant read / read+write / exec on paths (must exist; `.` and relative paths resolve against cwd). |
+| `WithWorkspace(dir)` | Set the sandbox root and child working directory (default: cwd). |
+| `WithNetwork(bool)` | Enable or disable outbound network (default: enabled). |
+| `WithEnv(key, value)` | Set an extra environment variable for the child. |
+| `WithProxyEnv(names...)` | Forward named host environment variables into the sandbox. |
+| `WithStdin` / `WithStdout` / `WithStderr(...)` | Wire stdio (`io.Reader` / `io.Writer`; unset = discard). |
+| `WithDenyTag(tag)` | Set the SBPL deny-message tag (used by `leash-trace` for denial correlation). |
+| `Execute(ctx)` | Run the command sandboxed. |
+| `ExitCode(err)` | Map an `Execute` error to a process exit code (0 / code / 128+signal / 1). |
+
+Sandboxing is macOS-only; on other platforms `Execute` returns `leash.ErrUnsupported`.
 
 ## Exit codes
 
-`sbx` preserves the child's exit code exactly. If the child is killed by a signal,
+`leash` preserves the child's exit code exactly. If the child is killed by a signal,
 the exit code is `128 + <signal number>` (POSIX convention).

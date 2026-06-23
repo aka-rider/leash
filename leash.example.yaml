@@ -27,9 +27,6 @@
 # exec:
 #   - ~/bin
 
-# Sandbox workspace root (default: current directory)
-# workspace: ~/wrk/project
-
 # Allow outbound network (default: true)
 # Set false to deny all outbound connections (same as --no-network)
 # network: true
