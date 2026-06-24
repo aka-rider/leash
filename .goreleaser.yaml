@@ -46,23 +46,20 @@ archives:
       - leash-universal
       - leash-trace-universal
     name_template: "leash_{{.Version}}_darwin_universal"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - leash.example.yaml
 
-brews:
+homebrew_casks:
   - name: leash
     ids:
       - leash
+    binaries:
+      - leash
+      - leash-trace
     repository:
       owner: aka-rider
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     description: "Transparent macOS seatbelt sandbox for any command"
     homepage: "https://github.com/aka-rider/leash"
-    license: MIT
-    install: |
-      bin.install "leash"
-      bin.install "leash-trace"
-    test: |
-      system "#{bin}/leash", "--help"
