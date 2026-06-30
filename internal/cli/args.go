@@ -30,10 +30,12 @@ type Grant struct {
 // Parsed is the result of tokenizing leash's argv.
 type Parsed struct {
 	// leash-level flags
-	ConfigPath string
-	TraceFile  string
-	NoNetwork  bool
-	Help       bool
+	ConfigPath  string
+	TraceFile   string
+	NoNetwork   bool
+	Help        bool
+	Worktree    bool   // --worktree was set
+	WorktreeName string // explicit name; empty = auto-generate
 
 	// grants from +w/+r/+x/−w/−r/−x in encounter order
 	Grants []Grant
@@ -100,6 +102,22 @@ func Parse(argv []string) (*Parsed, error) {
 
 		case tok == "--no-network":
 			p.NoNetwork = true
+			i++
+
+		case tok == "--worktree":
+			p.Worktree = true
+			if i+1 < len(argv) {
+				next := argv[i+1]
+				if next != "--" && !strings.HasPrefix(next, "-") && !strings.HasPrefix(next, "+") {
+					p.WorktreeName = next
+					i++
+				}
+			}
+			i++
+
+		case strings.HasPrefix(tok, "--worktree="):
+			p.Worktree = true
+			p.WorktreeName = strings.TrimPrefix(tok, "--worktree=")
 			i++
 
 		case tok == "--config":
@@ -226,6 +244,7 @@ Options:
   -w PATH              deny write to PATH (overrides all allows)
   -r PATH              deny read to PATH (overrides all allows, including implicit cwd read)
   -x PATH              deny exec to PATH (overrides all allows)
+  --worktree [NAME]    create a git worktree at <repo-parent>/<NAME> and grant write; NAME is auto-generated if omitted
   --no-network         deny all outbound network access
   --trace-file PATH    trace output file (default: ./leash-trace.log; - for stderr; leash-trace only)
   --config PATH        config file (default: searches .leash.yaml, leash.yaml, ~/.config/leash/leash.yaml)

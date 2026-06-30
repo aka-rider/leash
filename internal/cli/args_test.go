@@ -6,15 +6,17 @@ import (
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		name      string
-		argv      []string
-		wantCmd   []string
-		wantGrant []Grant
-		wantHelp  bool
-		wantNet   bool // true = want NoNetwork
-		wantCfg string
-		wantTF  string
-		wantErr bool
+		name             string
+		argv             []string
+		wantCmd          []string
+		wantGrant        []Grant
+		wantHelp         bool
+		wantNet          bool // true = want NoNetwork
+		wantCfg          string
+		wantTF           string
+		wantWorktree     bool
+		wantWorktreeName string
+		wantErr          bool
 	}{
 		{
 			name:    "bare command",
@@ -152,6 +154,44 @@ func TestParse(t *testing.T) {
 			argv:    []string{"claude", "+w", "/x"},
 			wantCmd: []string{"claude", "+w", "/x"},
 		},
+		// --worktree cases
+		{
+			name:         "--worktree bare, name from next token",
+			argv:         []string{"--worktree", "my-fix", "sh"},
+			wantWorktree: true, wantWorktreeName: "my-fix",
+			wantCmd: []string{"sh"},
+		},
+		{
+			name:         "--worktree= form",
+			argv:         []string{"--worktree=my-fix", "sh"},
+			wantWorktree: true, wantWorktreeName: "my-fix",
+			wantCmd: []string{"sh"},
+		},
+		{
+			name:         "--worktree bare before --, no name",
+			argv:         []string{"--worktree", "--", "sh"},
+			wantWorktree: true, wantWorktreeName: "",
+			wantCmd: []string{"sh"},
+		},
+		{
+			name:         "--worktree bare at end of argv, no name, no command",
+			argv:         []string{"--worktree"},
+			wantWorktree: true, wantWorktreeName: "",
+		},
+		{
+			name:         "--worktree does not consume a flag as name",
+			argv:         []string{"--worktree", "--no-network", "sh"},
+			wantWorktree: true, wantWorktreeName: "",
+			wantNet: true,
+			wantCmd: []string{"sh"},
+		},
+		{
+			name:         "--worktree does not consume a directive as name",
+			argv:         []string{"--worktree", "+w", "/tmp", "sh"},
+			wantWorktree: true, wantWorktreeName: "",
+			wantGrant: []Grant{{Perm: PermWrite, Path: "/tmp"}},
+			wantCmd:   []string{"sh"},
+		},
 		// Error cases
 		{
 			name:    "+w missing path EOF",
@@ -229,6 +269,12 @@ func TestParse(t *testing.T) {
 			}
 			if got.TraceFile != tc.wantTF {
 				t.Errorf("TraceFile: got %q, want %q", got.TraceFile, tc.wantTF)
+			}
+			if got.Worktree != tc.wantWorktree {
+				t.Errorf("Worktree: got %v, want %v", got.Worktree, tc.wantWorktree)
+			}
+			if got.WorktreeName != tc.wantWorktreeName {
+				t.Errorf("WorktreeName: got %q, want %q", got.WorktreeName, tc.wantWorktreeName)
 			}
 		})
 	}

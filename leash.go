@@ -12,6 +12,7 @@ import (
 type Leash struct {
 	Program    string
 	Args       []string
+	Dir        string // working directory for the command; empty = inherit caller's cwd
 	Network bool
 	Reads   []string
 	Writes     []string

@@ -107,6 +107,7 @@ func Execute(ctx context.Context, l Leash) error {
 	defer func() { _ = sb.Close() }()
 
 	cmd := exec.Command(bin, l.Args...)
+	cmd.Dir = l.Dir
 	cmd.Stdin = l.Stdin
 	cmd.Stdout = l.Stdout
 	cmd.Stderr = l.Stderr

@@ -34,6 +34,17 @@ func run() int {
 		return 2
 	}
 
+	if parsed.Worktree {
+		wtPath, err := createWorktree(parsed.WorktreeName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+			return 2
+		}
+		l.Writes = append(l.Writes, wtPath)
+		l.Dir = wtPath
+		fmt.Fprintf(os.Stderr, "leash: worktree: %s\n", wtPath)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
