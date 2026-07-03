@@ -1,0 +1,77 @@
+version: 2
+
+project_name: leash
+
+builds:
+  - id: leash
+    main: ./cmd/leash/
+    binary: leash
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+  - id: leash-trace
+    main: ./cmd/trace/
+    binary: leash-trace
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+universal_binaries:
+  - id: leash-universal
+    ids:
+      - leash
+    name_template: "leash"
+    replace: true
+
+  - id: leash-trace-universal
+    ids:
+      - leash-trace
+    name_template: "leash-trace"
+    replace: true
+
+archives:
+  - id: leash
+    ids:
+      - leash-universal
+      - leash-trace-universal
+    name_template: "leash_{{.Version}}_darwin_universal"
+    formats: [tar.gz]
+
+homebrew_casks:
+  - name: leash
+    ids:
+      - leash
+    binaries:
+      - leash
+      - leash-trace
+    repository:
+      owner: aka-rider
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    description: "Transparent macOS seatbelt sandbox for any command"
+    homepage: "https://github.com/aka-rider/leash"
+    url:
+      verified: github.com/aka-rider/leash
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}"]
+          end
