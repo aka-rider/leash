@@ -69,6 +69,22 @@ Interactive commands (e.g. `leash claude` with no arguments, or `leash cat`) wor
 normally: stdin/stdout/stderr are proxied transparently, including terminal control
 (Ctrl+C goes straight to the child).
 
+## ⚠ Warning: Shell redirection and piping escape the sandbox
+
+Redirection (`>`, `>>`) and pipes (`|`) typed on the same command line are set up by your *outer* shell, which opens the file or forks the piped-to process **before** `leash` (and therefore `sandbox-exec`) ever starts:
+
+```sh
+leash -w . -- echo 'hello' > file.txt      # zsh writes file.txt itself, before leash runs
+leash -w . -- echo 'hello' | tee file.txt  # tee is a separate, unsandboxed process forked by the outer shell
+```
+
+To have redirection or piping enforced by the sandbox, push it inside the command leash executes, e.g. with `sh -c`:
+
+```sh
+leash -w . -- sh -c 'echo 'hello' > file.txt'     # denied: the write happens inside the sandbox
+leash -w . -- sh -c 'echo 'hello' | tee file.txt' # denied: tee runs inside the sandbox too
+```
+
 ## How it works
 
 Each invocation compiles an SBPL (Sandbox Profile Language) policy from the active
