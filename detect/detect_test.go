@@ -16,6 +16,37 @@ import (
 	"github.com/aka-rider/leash/sandbox"
 )
 
+// setupRustCrate writes a minimal cargo crate with a lib, a test, and a
+// build script to a symlink-resolved t.TempDir(). Returns the crate dir.
+func setupRustCrate(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	must(t, os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte(`[package]
+name = "leashtest"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+`), 0600))
+	must(t, os.WriteFile(filepath.Join(dir, "build.rs"),
+		[]byte(`fn main(){ println!("cargo:warning=BUILDRS_RAN"); }`), 0600))
+	must(t, os.MkdirAll(filepath.Join(dir, "src"), 0755))
+	must(t, os.WriteFile(filepath.Join(dir, "src", "lib.rs"),
+		[]byte(`#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
+}
+`), 0600))
+	return dir
+}
+
 // sandboxRun creates a sandbox from cfg, wires Stdout/Stderr buffers onto cmd,
 // runs it inside the sandbox (60 s timeout), and returns stdout.
 // t.Fatal on sandbox setup failure or non-zero exit.
@@ -332,4 +363,74 @@ func TestDetect_Docker(t *testing.T) {
 	cmd.Dir = tmpDir
 
 	sandboxRun(t, cfg, cmd)
+}
+
+// TestDetect_Rust verifies that cargo can build and run a crate's tests
+// inside the detect profile. Exercises: cargo/rustc bin dir exec, CARGO_HOME
+// write (registry cache), and — the gap #2 case — exec on the crate's
+// target/ dir for the build-script binary and the compiled test binary,
+// both of which are created after the SBPL profile is compiled.
+func TestDetect_Rust(t *testing.T) {
+	home := os.Getenv("HOME")
+
+	cargoBin := resolveBin(t, "cargo")
+	crateDir := setupRustCrate(t)
+
+	// Rust's detector introspects the process cwd via os.Getwd() (the
+	// detector-registration loop has a fixed signature — see rust.go), so
+	// the crate must be the process cwd before calling detect.Rust.
+	t.Chdir(crateDir)
+
+	p := sandbox.NewToolProfile("detect", home)
+	var err error
+	p, err = detect.Homebrew(p)
+	if err != nil {
+		t.Fatalf("detect.Homebrew: %v", err)
+	}
+	p, err = detect.Xcode(p)
+	if err != nil {
+		t.Fatalf("detect.Xcode: %v", err)
+	}
+	p, err = detect.Rust(p)
+	if err != nil {
+		t.Fatalf("detect.Rust: %v", err)
+	}
+
+	grant := sandbox.NewToolProfile("grant", home)
+	must(t, grant.Allow(filepath.Dir(cargoBin), sandbox.Exec))
+	must(t, grant.Allow(crateDir, sandbox.Write))
+
+	cfg := sandbox.Config{
+		Profiles: []sandbox.Snapshot{grant.Snapshot(), p.Snapshot()},
+		ExtraEnv: map[string]string{
+			"CARGO_HOME":        filepath.Join(crateDir, "cargohome"),
+			"CARGO_NET_OFFLINE": "1",
+		},
+	}
+	sb, err := sandbox.New(cfg)
+	if err != nil {
+		t.Fatalf("sandbox.New: %v", err)
+	}
+	defer sb.Close()
+
+	cmd := exec.Command(cargoBin, "test")
+	cmd.Dir = crateDir
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	if err := sb.Run(ctx, cmd); err != nil {
+		t.Fatalf("run %v: %v\nstdout: %s\nstderr: %s",
+			cmd.Args, err, out.String(), errBuf.String())
+	}
+
+	combined := out.String() + errBuf.String()
+	if !strings.Contains(combined, "BUILDRS_RAN") {
+		t.Errorf("build script did not run (or was not allowed to exec): combined output %q", combined)
+	}
+	if !strings.Contains(out.String(), "test result: ok") {
+		t.Errorf("cargo test: unexpected stdout %q", out.String())
+	}
 }

@@ -70,6 +70,21 @@ func (p *ToolProfile) AllowFuture(raw string, perm Permission) error {
 	return nil
 }
 
+// AllowFutureDir grants perm on a directory that may not exist yet (e.g. a
+// build-output dir populated after the SBPL profile is compiled). The
+// entry is always emitted as an SBPL subpath rule (covers anything later
+// created beneath it), unlike AllowFuture which emits a literal rule
+// matching only the exact not-yet-existing path. Returns error on any
+// failure — never swallows.
+func (p *ToolProfile) AllowFutureDir(raw string, perm Permission) error {
+	path, err := ResolveFutureDir(raw, p.home)
+	if err != nil {
+		return fmt.Errorf("profile %q: %w", p.name, err)
+	}
+	p.entries = append(p.entries, entry{path: path, perm: perm})
+	return nil
+}
+
 // Deny records a deny rule for raw path and perm. Deny rules are emitted last
 // in the SBPL profile so they win under SBPL last-match-wins semantics.
 func (p *ToolProfile) Deny(raw string, perm Permission) error {

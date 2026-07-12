@@ -48,7 +48,7 @@ func Execute(ctx context.Context, l Leash) error {
 	detectProf := sandbox.NewToolProfile("detect", home)
 	for _, fn := range []func(sandbox.ToolProfile) (sandbox.ToolProfile, error){
 		detect.Claude, detect.Homebrew, detect.Docker,
-		detect.Git, detect.NPM, detect.Xcode, detect.Go, detect.Python,
+		detect.Git, detect.NPM, detect.Xcode, detect.Go, detect.Python, detect.Rust,
 	} {
 		if detectProf, err = fn(detectProf); err != nil {
 			return fmt.Errorf("leash: detect: %w", err)

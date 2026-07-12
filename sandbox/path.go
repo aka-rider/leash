@@ -75,6 +75,48 @@ func ResolveFuturePath(raw string, home string) (Path, error) {
 	return Path{Resolved: filepath.Join(parent, filepath.Base(expanded)), IsDir: false}, nil
 }
 
+// ResolveFutureDir resolves a directory that is allowed to not exist yet (it
+// may be created inside the sandbox — e.g. a build-output dir populated
+// after the SBPL profile is compiled). Unlike ResolveFuturePath, it always
+// returns IsDir=true so the emitted SBPL rule is a subpath (covers anything
+// later created beneath it), not a literal (which would only cover the
+// directory entry itself). Behavior: if raw exists, identical to
+// ResolvePath except it errors if raw is not a directory. Otherwise the
+// PARENT directory must exist: it is symlink-resolved and the base name is
+// re-joined, so the emitted SBPL subpath matches the canonical path the
+// kernel checks when the child later creates the directory.
+func ResolveFutureDir(raw, home string) (Path, error) {
+	expanded, err := expandAbs(raw, home)
+	if err != nil {
+		return Path{}, err
+	}
+
+	// Fast path: raw already exists.
+	if resolved, err := filepath.EvalSymlinks(expanded); err == nil {
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return Path{}, fmt.Errorf("resolve future dir %q: %w", raw, err)
+		}
+		if !info.IsDir() {
+			return Path{}, fmt.Errorf("resolve future dir %q: not a directory", raw)
+		}
+		return Path{Resolved: resolved, IsDir: true}, nil
+	}
+
+	// Not-yet-existing: the parent must exist. Resolve it and rejoin the
+	// base name, so the emitted subpath matches the canonical path the
+	// kernel will check when the child creates the directory.
+	parent, err := filepath.EvalSymlinks(filepath.Dir(expanded))
+	if err != nil {
+		return Path{}, fmt.Errorf("resolve future dir %q: parent: %w", raw, err)
+	}
+	if _, err := os.Stat(parent); err != nil {
+		return Path{}, fmt.Errorf("resolve future dir %q: parent: %w", raw, err)
+	}
+
+	return Path{Resolved: filepath.Join(parent, filepath.Base(expanded)), IsDir: true}, nil
+}
+
 // expandAbs expands a leading ~ to home and makes the result absolute,
 // joining relative paths to cwd. It performs no filesystem access.
 func expandAbs(raw, home string) (string, error) {
