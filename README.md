@@ -32,11 +32,12 @@ leash claude --print "write a go server"        # cwd is writable by default
 leash claude                                    # interactive commands work too (tty is proxied transparently)
 leash +r ~/data python3 analyse.py              # extra read-only path
 leash -x /usr/bin/curl go test ./...            # deny curl, cwd stays writable
-leash --no-network go test ./...                # block all outbound network
+leash --no-network go test ./...                # remove all network access (inbound and outbound)
 leash --env FOO=bar -- sh -c 'echo $FOO'        # set an extra env var in the sandbox
 leash --proxy-env HTTP_PROXY -- curl example.com # forward a var from the host env
 leash -w . -- go build -v ./...                 # read-only cwd, pass child flags through --
 leash --worktree my-fix -- go test ./...        # run in a fresh git worktree named my-fix (git add/commit work inside it)
+leash-trace go test ./...                        # run like leash; log kernel denials to ./leash-trace.log
 ```
 
 | Directive | Effect |
@@ -85,15 +86,59 @@ leash -w . -- sh -c 'echo 'hello' > file.txt'     # denied: the write happens in
 leash -w . -- sh -c 'echo 'hello' | tee file.txt' # denied: tee runs inside the sandbox too
 ```
 
+## Environment
+
+The sandboxed child gets a **scrubbed**, built-from-scratch environment — none of
+the host's variables leak in except what's listed below.
+
+Always set: `PATH` (inherited from the host, or `/usr/bin:/bin` if the host has
+none), `HOME`, `TMPDIR`, `LANG`/`LC_ALL` (`en_US.UTF-8`), `USER`/`LOGNAME`, `SHELL`
+(`/bin/sh`), and the terminal vars `TERM`, `COLORTERM`, `FORCE_COLOR`.
+Proxied from the host only when present: `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`,
+`TERM_FEATURES`. Always forwarded: every host `XPC_*` variable (system daemon IPC,
+e.g. Keychain).
+
+Everything else is dropped. Inject it explicitly with `--env KEY=VALUE`, or forward
+it from the host with `--proxy-env NAME` — `--proxy-env` errors out if the named
+variable is absent from the host environment.
+
+## Network
+
+By default outbound network access is fully allowed; inbound is allowed only on
+`localhost`. `--no-network` removes the entire network allowance — both inbound
+and outbound.
+
 ## How it works
 
 Each invocation compiles an SBPL (Sandbox Profile Language) policy from the active
 grants and denials and passes it to `sandbox-exec`. The child process runs inside
 that policy; any access not explicitly allowed is denied by the kernel.
 
-`leash-trace` attaches a `log stream` watcher to correlate kernel denials with the
-run and writes them to `./leash-trace.log` as `<category>: <path>` lines. Use
-`--trace-file PATH` to redirect, or `--trace-file -` for stderr.
+Every run also unconditionally probes a fixed set of developer tools — claude,
+docker, git, go, homebrew, npm, python, rust, xcode — and grants each detected
+tool its own paths and capabilities.
+
+## Tracing denials
+
+`leash-trace` runs the command exactly like `leash`, plus a `log stream` watcher
+that correlates kernel sandbox denials with the run and writes one line per
+denial as `<category>: <target>` — `target` is a file path, `host:port`, or mach
+service name depending on the category. Categories: `read`, `write`, `exec`,
+`network`, `mach`, `ipc`, `other`.
+
+Output goes to `./leash-trace.log` by default. `--trace-file PATH` redirects it;
+`--trace-file -` writes to stderr instead. A real `--trace-file` path refuses to
+overwrite an existing file and errors with `trace file already exists: … (delete
+it or choose a different name)`.
+
+`leash-trace` needs the macOS `log` binary. If it's missing, or `log stream` fails
+to start, `leash-trace` degrades gracefully: it runs the child directly (without
+tracing) and writes a `# trace unavailable: …` note to the sink, preserving the
+child's exit code either way.
+
+After the child exits, `leash-trace` drains the log stream for about 3 seconds to
+catch denials that arrive late, so traced runs take roughly 3 seconds longer than
+the same command under plain `leash`.
 
 ## Use as a library
 
