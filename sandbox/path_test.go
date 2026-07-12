@@ -149,3 +149,72 @@ func TestResolveFuturePath_EmptyHome(t *testing.T) {
 		t.Fatal("expected error for empty home")
 	}
 }
+
+// TestResolveFutureDir_MissingSubdir is the falsifiable core of the design:
+// a not-yet-existing subdir of an existing directory (e.g. a crate's
+// target/ before cargo runs) must resolve with IsDir=true, so the emitted
+// SBPL rule is a subpath (covers anything later created beneath it) rather
+// than a literal.
+func TestResolveFutureDir_MissingSubdir(t *testing.T) {
+	home := os.Getenv("HOME")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(t.TempDir()): %v", err)
+	}
+	notYetCreated := filepath.Join(dir, "target")
+
+	got, err := ResolveFutureDir(notYetCreated, home)
+	if err != nil {
+		t.Fatalf("ResolveFutureDir(%q): %v", notYetCreated, err)
+	}
+	want := filepath.Join(dir, "target")
+	if got.Resolved != want {
+		t.Errorf("Resolved = %q, want %q", got.Resolved, want)
+	}
+	if !got.IsDir {
+		t.Error("IsDir = false, want true for not-yet-existing dir")
+	}
+}
+
+// TestResolveFutureDir_ExistingDir verifies ResolveFutureDir returns
+// IsDir=true when raw already exists as a directory.
+func TestResolveFutureDir_ExistingDir(t *testing.T) {
+	home := os.Getenv("HOME")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(t.TempDir()): %v", err)
+	}
+	sub := filepath.Join(dir, "target")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	got, err := ResolveFutureDir(sub, home)
+	if err != nil {
+		t.Fatalf("ResolveFutureDir(%q): %v", sub, err)
+	}
+	if got.Resolved != sub {
+		t.Errorf("Resolved = %q, want %q", got.Resolved, sub)
+	}
+	if !got.IsDir {
+		t.Error("IsDir = false, want true for existing dir")
+	}
+}
+
+// TestResolveFutureDir_ExistingFile verifies ResolveFutureDir errors when
+// raw already exists but is a regular file, not a directory.
+func TestResolveFutureDir_ExistingFile(t *testing.T) {
+	home := os.Getenv("HOME")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(t.TempDir()): %v", err)
+	}
+	file := filepath.Join(dir, "target")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := ResolveFutureDir(file, home); err == nil {
+		t.Fatal("expected error for existing regular file")
+	}
+}
